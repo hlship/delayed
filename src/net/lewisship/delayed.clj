@@ -1,5 +1,6 @@
 (ns net.lewisship.delayed
-  (:import (clojure.lang IDeref IPending IFn)))
+  (:import (clojure.lang IDeref IPending IFn)
+           (net.lewisship.delayed.impl DelayState)))
 
 (defprotocol IReset
   "Allows a stateful object to be reset to base state."
@@ -9,31 +10,27 @@
 
 ;; A re-implementation of clojure.lang.Delay that allows for the delay to reset
 ;; back to unrealized.
-(deftype ResettableDelay [^:volatile-mutable value
-                         ^:volatile-mutable ^Throwable exception
-                         ^:volatile-mutable realized?
-                         ^IFn constructor
+(deftype ResettableDelay [^DelayState state
+                          ^IFn constructor
                           ^IFn destructor]
-
-
   IDeref
   (deref [this]
-    (when-not realized?
+    (when-not (.isRealized state)
       (locking this
-        (when-not realized?
+        (when-not (.isRealized state)
           (try
-            (set! value (constructor))
+            (set! (. state value) (constructor))
             (catch Throwable e
-                   (set! exception e)))
-          (set! realized? true))))
+              (set! (. state exception) e)))
+          (set! (. state isRealized) true))))
 
-    (if exception
+    (if-let [exception (.exception state)]
       (throw exception)
-      value))
+      (.value state)))
 
   IPending
   (isRealized [_]
-    realized?)
+    (.isRealized state))
 
   IReset
   (reset-state! [this]
@@ -41,13 +38,12 @@
       ;; If realized and non-null then let the destructor function destroy the value;
       ;; this is intended for things like closing database connections or shutting
       ;; down thread pools.
-      (when (and realized?
-                 value
-                 destructor)
-        (destructor value))
-      (set! realized? false)
-      (set! value nil)
-      (set! exception nil))
+      (when (and destructor (.isRealized state))
+        (when-let [value (.value state)]
+          (destructor value)))
+      (set! (. state isRealized) false)
+      (set! (. state value) nil)
+      (set! (. state exception) nil))
 
     this))
 
@@ -57,7 +53,7 @@
   ([constructor]
    (new-resettable-delay constructor nil))
   ([constructor destructor]
-   (ResettableDelay. nil nil false constructor destructor)))
+   (ResettableDelay. (DelayState.) constructor destructor)))
 
 ;; TODO: Use some kind of weak reference instead, to allow for new defs during
 ;; REPL development.
@@ -69,6 +65,7 @@
   (locking *delays
     (run! reset-state! @*delays)))
 
+;; TODO: May make sense for *delays to be a map keyed on Var, or the weak hash map idea.
 (defn save!
   "Saves a delay so that it can later be reset.  Returns the delay."
   [^ResettableDelay delay]
@@ -92,15 +89,23 @@
    `(new-resettable-delay (fn [] ~constructor) ~destructor)))
 
 (defmacro defdelay
-  "Defines a var for a resettable delay."
-  ([sym init]
-   `(defdelay sym nil init))
-  ([sym docstring init]
-   {:pre [(or (nil? docstring) (string? docstring))
-          (some? init)]}
-   (let [sym-meta (cond-> (meta sym)
-                    docstring (assoc :doc docstring))
-         {:keys [destructor]} sym-meta
-         constructor `(fn [] ~init)]
-     `(def ~(with-meta sym sym-meta)
-        (save! (new-resettable-delay ~constructor ~destructor))))))
+  "Defines a var for a resettable delay.
+
+  The init expression is required; it may be prefixed by
+  a docstring, and suffixed by a destructor function."
+  {:arglists '([docstring? init-expression destructor-fn?])}
+  [sym & terms]
+  (let [maybe-docstring (first terms)
+        [docstring terms] (if (string? maybe-docstring)
+                            [maybe-docstring (rest terms)]
+                            [nil terms])
+        _ (assert (seq terms)
+                  "Missing init expression")
+        [init destructor & more] terms
+        _ (assert (nil? more)
+                  "Extra arguments beyond docstring, init expression, and destructor function")
+        sym-meta (cond-> (meta sym)
+                   docstring (assoc :doc docstring))
+        constructor `(fn [] ~init)]
+    `(def ~(with-meta sym sym-meta)
+       (save! (new-resettable-delay ~constructor ~destructor)))))
