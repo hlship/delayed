@@ -57,3 +57,21 @@
     (d/reset-state! d)
 
     (is (= [[:destructed ::value]] @*log))))
+
+
+(d/defdelay with-docstring
+  "Docstring for with-docstring"
+  (do
+    (log :with-docstring)
+    (+ 1 2)))
+
+
+(deftest docstring-conveyed-to-meta
+  (is (= "Docstring for with-docstring"
+         (-> #'with-docstring meta :doc)))
+
+  (d/reset-all!)
+
+  (is (= 3 @with-docstring))
+
+  (is (= [:with-docstring] @*log)))
