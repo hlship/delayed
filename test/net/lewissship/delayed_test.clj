@@ -75,3 +75,28 @@
   (is (= 3 @with-docstring))
 
   (is (= [:with-docstring] @*log)))
+
+(d/defdelay all-options
+  "All options"
+  (do
+    (log :construct-all-options)
+    42)
+  (fn [v]
+    (log [:destruct-all-options v])))
+
+(deftest defdelay-all-options
+  (is (= [] @*log))
+
+  (is (= false (realized? all-options)))
+
+  (is (= 42 @all-options))
+
+  (is (= [:construct-all-options] @*log))
+
+  (wipe-log)
+
+  (d/reset-state! all-options)
+
+  (is (= false (realized? all-options)))
+
+  (is (= [[:destruct-all-options 42]]) @*log))
