@@ -19,10 +19,10 @@
       (locking this
         (when-not (.isRealized state)
           (try
-            (set! (. state value) (constructor))
+            (set! (.value state) (constructor))
             (catch Throwable e
-              (set! (. state exception) e)))
-          (set! (. state isRealized) true))))
+              (set! (.exception state) e)))
+          (set! (.isRealized state) true))))
 
     (if-let [exception (.exception state)]
       (throw exception)
@@ -41,9 +41,9 @@
       (when (and destructor (.isRealized state))
         (when-let [value (.value state)]
           (destructor value)))
-      (set! (. state isRealized) false)
-      (set! (. state value) nil)
-      (set! (. state exception) nil))
+      (set! (.isRealized state) false)
+      (set! (.value state) nil)
+      (set! (.exception state) nil))
 
     this))
 
