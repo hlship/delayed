@@ -29,8 +29,8 @@
   ([constructor destructor]
    (ResettableDelay. (DelayState. constructor destructor))))
 
-(def ^:no-doc *delays
-  "Map of qualified symbol to ResettableDelay; exposed only for testing purposes."
+(def ^:private *delays
+  "Map of qualified symbol to ResettableDelay."
   (atom {}))
 
 (defn reset-saved!
@@ -44,6 +44,10 @@
 
   The k is typically a qualified symbol for the delay.  When a delay is saved for the key,
   and prior delay for the key is reset.
+
+  When saving a delay, if a prior existing delay is present with the same key, the existing delay will
+  be reset. This is useful in REPL oriented development, as the [[defdelay]] may redefine a var containing
+  a delay.
 
   Returns the delay."
   [k ^ResettableDelay delay]

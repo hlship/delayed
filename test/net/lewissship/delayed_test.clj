@@ -101,3 +101,33 @@
   (is (= false (realized? all-options)))
 
   (is (= [[:destruct-all-options 42]]) @*log))
+
+(deftest save!-with-same-key-destructs-priore
+  (let [d-first (d/delayed (do
+                             (log :first)
+                             42)
+                           (fn [v]
+                             (log [:first v])))
+        d-second (d/delayed (do
+                              (log :second)
+                              99)
+                            (fn [v]
+                              (log [:second v])))]
+    (d/save! ::k d-first)
+    (is (= 42 @d-first))
+
+    (d/save! ::k d-second)
+
+    (is (= [:first
+            [:first 42]]
+           @*log))
+
+    (wipe-log)
+
+    (is (= 99 @d-second))
+
+    (d/reset-saved!)
+
+    (is (= [:second
+            [:second 99]])
+        @*log)))
