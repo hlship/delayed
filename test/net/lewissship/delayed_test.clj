@@ -101,30 +101,3 @@
   (is (= false (realized? all-options)))
 
   (is (= [[:destruct-all-options 42]]) @*log))
-
-(deftest weak-refs-are-reset
-  (reset! d/*delays [])
-  (let [d (d/save! (d/delayed
-                     (do
-                       (log ::wr-construct)
-                       42)
-                     (fn [v]
-                       (log [[::wr-destruct v]]))))]
-    (is (= 42 @d))
-    (is (= [::wr-construct] @*log)))
-
-  (wipe-log)
-  (System/gc)
-
-  (loop [i 0]
-    (prn :loop i :log @*log)
-    (when-not (= [[::wr-destruct 42]] @*log)
-
-      (when (> i 20)
-        (throw (ex-info "Never saw destruct log"
-                        {:log @*log
-                         :delays @d/*delays})))
-
-      (System/gc)
-      (Thread/sleep 100)
-      (recur (inc i)))))

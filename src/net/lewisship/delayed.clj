@@ -29,11 +29,15 @@
   ([constructor destructor]
    (ResettableDelay. (DelayState. constructor destructor))))
 
+(def ^:no-doc *delays
+  "Map of qualified symbol to ResettableDelay; exposed only for testing purposes."
+  (atom {}))
+
 (defn reset-saved!
   "Resets all previously saved delay objects."
   []
   ;; Turn References back into ResettableDelays (unless the reference has been cleared)
-  (run! r/reset-state! (keep #(.get ^Reference %) @*delays)))
+  (run! r/reset-state! (vals @*delays)))
 
 (defn save!
   "Saves a delay so that it can later be reset by [[reset-all!]].
@@ -46,12 +50,15 @@
   {:pre [(some? delay)]}
   (loop []
     (let [delays @*delays
-          prior (get delays k)
-          delays' (assoc delays k delay)]
-      (if (compare-and-set! *delaysπ))
-      )
-    (swap! *delays conj r))
-  delay)
+          prior (get delays k)]
+      (if-not (compare-and-set! *delays
+                                delays
+                                (assoc delays k delay))
+        (recur)
+        (do
+          (when prior
+            (r/reset-state! prior))
+          delay)))))
 
 (defmacro delayed
   "Similar clojure.core/delay but returns a ResettableDelay.
@@ -86,8 +93,9 @@
         [init destructor & more] terms
         _ (assert (nil? more)
                   "Extra arguments beyond docstring, init expression, and destructor function")
+        qualifed-sym (symbol (name (ns-name *ns*)) (name sym))
         sym-meta (cond-> (meta sym)
                    docstring (assoc :doc docstring))
         constructor `(fn [] ~init)]
     `(def ~(with-meta sym sym-meta)
-       (save! (new-resettable-delay ~constructor ~destructor)))))
+       (save! '~qualifed-sym (new-resettable-delay ~constructor ~destructor)))))

@@ -50,7 +50,4 @@ public class DelayState {
         exception = null;
         isRealized = false;
     }
-
-    protected void finalize() { reset(); }
-
 }
