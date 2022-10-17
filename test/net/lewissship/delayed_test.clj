@@ -1,5 +1,6 @@
 (ns net.lewissship.delayed-test
   (:require [clojure.test :refer [deftest is use-fixtures]]
+            [net.lewisship.reset :as r]
             [net.lewisship.delayed :as d]))
 
 (def *log (atom []))
@@ -34,7 +35,7 @@
 
     (is (= [] @*log))
 
-    (d/reset-state! d)
+    (r/reset-state! d)
 
     (is (= false (realized? d)))
 
@@ -54,7 +55,7 @@
 
     (wipe-log)
 
-    (d/reset-state! d)
+    (r/reset-state! d)
 
     (is (= [[:destructed ::value]] @*log))))
 
@@ -70,7 +71,7 @@
   (is (= "Docstring for with-docstring"
          (-> #'with-docstring meta :doc)))
 
-  (d/reset-all!)
+  (d/reset-saved!)
 
   (is (= 3 @with-docstring))
 
@@ -95,8 +96,35 @@
 
   (wipe-log)
 
-  (d/reset-state! all-options)
+  (r/reset-state! all-options)
 
   (is (= false (realized? all-options)))
 
   (is (= [[:destruct-all-options 42]]) @*log))
+
+(deftest weak-refs-are-reset
+  (reset! d/*delays [])
+  (let [d (d/save! (d/delayed
+                     (do
+                       (log ::wr-construct)
+                       42)
+                     (fn [v]
+                       (log [[::wr-destruct v]]))))]
+    (is (= 42 @d))
+    (is (= [::wr-construct] @*log)))
+
+  (wipe-log)
+  (System/gc)
+
+  (loop [i 0]
+    (prn :loop i :log @*log)
+    (when-not (= [[::wr-destruct 42]] @*log)
+
+      (when (> i 20)
+        (throw (ex-info "Never saw destruct log"
+                        {:log @*log
+                         :delays @d/*delays})))
+
+      (System/gc)
+      (Thread/sleep 100)
+      (recur (inc i)))))

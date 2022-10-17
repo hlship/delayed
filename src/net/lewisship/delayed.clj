@@ -1,49 +1,23 @@
 (ns net.lewisship.delayed
-  (:import (clojure.lang IDeref IPending IFn)
-           (net.lewisship.delayed.impl DelayState)))
-
-(defprotocol IReset
-  "Allows a stateful object to be reset to base state."
-
-  (reset-state! [this]
-    "Resets the state of this object, returning the object in its reset state."))
+  (:require [net.lewisship.reset :as r])
+  (:import (clojure.lang IDeref IPending)
+           (net.lewisship.delayed.impl DelayState)
+           (java.lang.ref ReferenceQueue Reference WeakReference)))
 
 ;; A re-implementation of clojure.lang.Delay that allows for the delay to reset
 ;; back to unrealized.
-(deftype ResettableDelay [^DelayState state
-                          ^IFn constructor
-                          ^IFn destructor]
+(deftype ResettableDelay [^DelayState state]
   IDeref
-  (deref [this]
-    (when-not (.isRealized state)
-      (locking this
-        (when-not (.isRealized state)
-          (try
-            (set! (.value state) (constructor))
-            (catch Throwable e
-              (set! (.exception state) e)))
-          (set! (.isRealized state) true))))
-
-    (if-let [exception (.exception state)]
-      (throw exception)
-      (.value state)))
+  (deref [_]
+    (.realizeValue state))
 
   IPending
   (isRealized [_]
     (.isRealized state))
 
-  IReset
+  r/IReset
   (reset-state! [this]
-    (locking this
-      ;; If realized and non-null then let the destructor function destroy the value;
-      ;; this is intended for things like closing database connections or shutting
-      ;; down thread pools.
-      (when (and destructor (.isRealized state))
-        (when-let [value (.value state)]
-          (destructor value)))
-      (set! (.isRealized state) false)
-      (set! (.value state) nil)
-      (set! (.exception state) nil))
+    (.reset state)
 
     this))
 
@@ -53,30 +27,36 @@
   ([constructor]
    (new-resettable-delay constructor nil))
   ([constructor destructor]
-   (ResettableDelay. (DelayState.) constructor destructor)))
+   (ResettableDelay. (DelayState. constructor destructor))))
 
-;; TODO: Use some kind of weak reference instead, to allow for new defs during
-;; REPL development.
-(defonce ^:private *delays (atom []))
-
-(defn reset-all!
-  "Resets all previously defined delay objects."
+(defn reset-saved!
+  "Resets all previously saved delay objects."
   []
-  (locking *delays
-    (run! reset-state! @*delays)))
+  ;; Turn References back into ResettableDelays (unless the reference has been cleared)
+  (run! r/reset-state! (keep #(.get ^Reference %) @*delays)))
 
-;; TODO: May make sense for *delays to be a map keyed on Var, or the weak hash map idea.
 (defn save!
-  "Saves a delay so that it can later be reset.  Returns the delay."
-  [^ResettableDelay delay]
+  "Saves a delay so that it can later be reset by [[reset-all!]].
+
+  The k is typically a qualified symbol for the delay.  When a delay is saved for the key,
+  and prior delay for the key is reset.
+
+  Returns the delay."
+  [k ^ResettableDelay delay]
   {:pre [(some? delay)]}
-  (swap! *delays conj delay)
+  (loop []
+    (let [delays @*delays
+          prior (get delays k)
+          delays' (assoc delays k delay)]
+      (if (compare-and-set! *delaysπ))
+      )
+    (swap! *delays conj r))
   delay)
 
 (defmacro delayed
   "Similar clojure.core/delay but returns a ResettableDelay.
 
-  A single form is the constructor, and expression that will be invoked
+  A single form is the constructor, an expression that will be invoked
   once, on demand, to supply the delayed value (it will be invoked again
   after the delay is reset).
 
@@ -90,6 +70,8 @@
 
 (defmacro defdelay
   "Defines a var for a resettable delay.
+
+  The delay is passed to [[save!]] to it can be reset by [[reset-all!]].
 
   The init expression is required; it may be prefixed by
   a docstring, and suffixed by a destructor function."
