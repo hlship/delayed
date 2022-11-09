@@ -1,11 +1,10 @@
 (ns net.lewisship.delayed
+  "An improved version of Clojure's delay that allows the delay instance's internal
+  state to be reset."
   (:require [net.lewisship.reset :as r])
   (:import (clojure.lang IDeref IPending)
-           (net.lewisship.delayed.impl DelayState)
-           (java.lang.ref ReferenceQueue Reference WeakReference)))
+           (net.lewisship.delayed.impl DelayState)))
 
-;; A re-implementation of clojure.lang.Delay that allows for the delay to reset
-;; back to unrealized.
 (deftype ResettableDelay [^DelayState state]
   IDeref
   (deref [_]
